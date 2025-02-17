@@ -12,29 +12,78 @@ L'application est composée de plusieurs microservices interconnectés, chacun a
 - **Order Service** : Gère les commandes des utilisateurs, intégrant des mécanismes de validation et de traitement des paiements.
 - **Notification Service** : Envoie des notifications par e-mail et SMS, utilisant des services tiers comme Twilio et AWS SES.
 
-## Architecture de l'Application
-L'architecture est basée sur des microservices, permettant une gestion modulaire et indépendante des différents composants. Chaque service est conteneurisé avec Docker et déployé sur Kubernetes, assurant une scalabilité et une résilience optimales.
+## Architecture Technique
+### Microservices
+- **Frontend**: Utilise Next.js pour le rendu côté serveur et la génération de pages statiques.
+- **API Gateway**: Implémente des règles de sécurité et de routage.
+- **Auth Service**: Utilise JWT pour la gestion des sessions et MongoDB pour stocker les données utilisateurs.
+- **Product Service**: Intègre une base de données PostgreSQL pour la gestion des produits.
+- **Order Service**: Utilise MongoDB pour stocker les commandes et Kafka pour la communication événementielle.
+- **Notification Service**: Envoie des notifications via Twilio et AWS SES.
 
-## Procédure de Conteneurisation
-Chaque service a son propre `Dockerfile` qui définit l'environnement d'exécution. Un fichier `docker-compose.yml` est utilisé pour orchestrer les conteneurs lors du développement local, facilitant ainsi le démarrage et l'arrêt des services.
+### Infrastructure
+- **Conteneurisation**: Docker pour l'isolation des services
+- **Orchestration**: Kubernetes pour la gestion des conteneurs
+- **Base de données**: MongoDB et PostgreSQL
+- **Cache**: Redis pour améliorer les performances
+- **Message Broker**: Kafka pour la communication asynchrone
 
-## Configuration et Déploiement de l'Infrastructure sur le Cloud
-L'application est déployée sur un fournisseur de cloud (AWS ou Azure) en utilisant Kubernetes pour la gestion des conteneurs. Les configurations de déploiement sont définies dans des fichiers YAML, permettant une gestion simplifiée des ressources.
+## Pipeline CI/CD
+### Étapes Automatisées
+1. **Validation du Code**
+   - Linting avec ESLint
+   - Tests unitaires avec Jest
+   - Analyse de sécurité avec Snyk
 
-## Création et Mise en Œuvre du Pipeline CI/CD
-Un pipeline CI/CD est mis en place à l'aide de GitHub Actions. Ce pipeline inclut :
-- L'analyse de code et les tests automatisés pour garantir la qualité du code.
-- La construction et le déploiement des images Docker, assurant que les dernières modifications sont rapidement mises en production.
-- Des notifications Slack pour informer l'équipe des résultats des builds et des déploiements.
+2. **Construction et Tests**
+   - Build des images Docker
+   - Tests d'intégration
+   - Tests de performance avec k6
 
-## Outils de Collaboration Utilisés
-Des outils comme GitHub pour la gestion de code source et Slack pour la communication entre les membres de l'équipe ont été utilisés pour faciliter la collaboration. Trello a également été utilisé pour la gestion des tâches et le suivi des progrès.
+3. **Déploiement**
+   - Déploiement sur environnement de staging
+   - Tests de validation
+   - Déploiement en production
 
-## Mise en Place de la Pratique des Small Batches
-La pratique des Small Batches a été adoptée pour favoriser des déploiements fréquents et rapides, permettant ainsi de mesurer la fréquence des déploiements et d'optimiser l'efficacité du processus. Cela réduit également le risque d'erreurs en limitant la taille des modifications apportées à chaque déploiement.
+### Monitoring et Logging
+- **Prometheus**: Collecte des métriques
+- **Grafana**: Visualisation des données
+- **ELK Stack**: Gestion centralisée des logs
+  - Elasticsearch pour le stockage
+  - Logstash pour le traitement
+  - Kibana pour la visualisation
 
-## Mesures de Performance
-Des outils de surveillance comme Prometheus et Grafana sont intégrés pour suivre les performances de l'application et détecter les anomalies. Des tests de charge sont également prévus pour évaluer la capacité de l'application à gérer des volumes élevés de trafic.
+## Pratiques DevOps Appliquées
+### Small Batches
+- Déploiements fréquents et de petite taille
+- Réduction des risques d'erreurs
+- Feedback rapide
+
+### Automatisation
+- Scripts de déploiement automatisés
+- Tests automatisés
+- Monitoring automatique
+
+### Collaboration
+- GitHub pour le versioning
+- Slack pour la communication
+- Trello pour la gestion des tâches
+
+## Mesures et Métriques
+### Performance
+- Temps de réponse des API
+- Taux de succès des requêtes
+- Utilisation des ressources
+
+### Déploiement
+- Fréquence des déploiements
+- Temps moyen de récupération (MTTR)
+- Taux d'échec des déploiements
 
 ## Conclusion
-Ce projet a permis de mettre en pratique les principes DevOps, en favorisant la collaboration, l'automatisation et la résilience de l'application. Les étapes décrites dans ce rapport fournissent une base solide pour des développements futurs et des améliorations continues.
+Ce projet démontre l'application réussie des principes DevOps dans un environnement de microservices. L'architecture mise en place permet une scalabilité efficace, une maintenance simplifiée et une évolution continue du système.
+
+### Perspectives d'Amélioration
+- Implémentation de tests de chaos
+- Optimisation des performances
+- Renforcement de la sécurité
