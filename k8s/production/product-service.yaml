@@ -1,0 +1,209 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: product-service
+  namespace: production
+  labels:
+    app: product-service
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: product-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: product-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "4002"
+    spec:
+      containers:
+      - name: product-service
+        image: ${DOCKER_REGISTRY}/product-service:latest
+        ports:
+        - containerPort: 4002
+        resources:
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+          limits:
+            cpu: "400m"
+            memory: "512Mi"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 4002
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 4002
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: POSTGRES_URI
+          valueFrom:
+            secretKeyRef:
+              name: product-service-secrets
+              key: postgres-uri
+        - name: REDIS_URL
+          value: "redis://redis-master:6379"
+        - name: CACHE_TTL
+          value: "3600"
+        - name: ELASTICSEARCH_NODE
+          value: "http://elasticsearch:9200"
+        - name: KAFKA_BROKERS
+          value: "kafka-headless:9092"
+        volumeMounts:
+        - name: product-service-config
+          mountPath: /app/config
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: product-service-config
+        configMap:
+          name: product-service-config
+      - name: tmp
+        emptyDir: {}
+      imagePullSecrets:
+      - name: docker-registry-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: product-service
+  namespace: production
+spec:
+  type: ClusterIP
+  ports:
+  - port: 4002
+    targetPort: 4002
+    protocol: TCP
+  selector:
+    app: product-service
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: product-service-hpa
+  namespace: production
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: product-service
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  - type: Object
+    object:
+      metric:
+        name: requests-per-second
+      describedObject:
+        apiVersion: networking.k8s.io/v1
+        kind: Ingress
+        name: product-service
+      target:
+        type: Value
+        value: 1000
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: product-service-pdb
+  namespace: production
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: product-service
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: product-service
+  namespace: production
+spec:
+  host: product-service
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 100
+      http:
+        http1MaxPendingRequests: 100
+        maxRequestsPerConnection: 10
+    outlierDetection:
+      consecutive5xxErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 100
+    loadBalancer:
+      simple: LEAST_CONN
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: product-service-config
+  namespace: production
+data:
+  product-config.yml: |
+    database:
+      poolSize: 20
+      idleTimeoutMillis: 30000
+      connectionTimeoutMillis: 2000
+    cache:
+      enabled: true
+      ttl: 3600
+      maxSize: 1000
+    search:
+      indexName: products
+      refreshInterval: "30s"
+      numberOfShards: 3
+      numberOfReplicas: 1
+    kafka:
+      topics:
+        productUpdates: product-updates
+        inventory: inventory-updates
+      groupId: product-service-group
+    monitoring:
+      metrics:
+        enabled: true
+        interval: 15
+      tracing:
+        enabled: true
+        samplingRate: 0.1
+    api:
+      rateLimit:
+        windowMs: 60000
+        maxRequests: 1000
+      pagination:
+        defaultLimit: 20
+        maxLimit: 100
+      caching:
+        strategies:
+          - pattern: "GET /products"
+            ttl: 3600
+          - pattern: "GET /products/:id"
+            ttl: 1800

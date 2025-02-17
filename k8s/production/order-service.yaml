@@ -1,0 +1,233 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+  namespace: production
+  labels:
+    app: order-service
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: order-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: order-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "4003"
+    spec:
+      containers:
+      - name: order-service
+        image: ${DOCKER_REGISTRY}/order-service:latest
+        ports:
+        - containerPort: 4003
+        resources:
+          requests:
+            cpu: "300m"
+            memory: "512Mi"
+          limits:
+            cpu: "600m"
+            memory: "1Gi"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 4003
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 4003
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: MONGODB_URI
+          valueFrom:
+            secretKeyRef:
+              name: order-service-secrets
+              key: mongodb-uri
+        - name: REDIS_URL
+          value: "redis://redis-master:6379"
+        - name: KAFKA_BROKERS
+          value: "kafka-headless:9092"
+        - name: PAYMENT_SERVICE_URL
+          value: "http://payment-service:4004"
+        - name: PRODUCT_SERVICE_URL
+          value: "http://product-service:4002"
+        volumeMounts:
+        - name: order-service-config
+          mountPath: /app/config
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: order-service-config
+        configMap:
+          name: order-service-config
+      - name: tmp
+        emptyDir: {}
+      imagePullSecrets:
+      - name: docker-registry-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-service
+  namespace: production
+spec:
+  type: ClusterIP
+  ports:
+  - port: 4003
+    targetPort: 4003
+    protocol: TCP
+  selector:
+    app: order-service
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: order-service-hpa
+  namespace: production
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: order-service
+  minReplicas: 3
+  maxReplicas: 15
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  - type: Pods
+    pods:
+      metric:
+        name: kafka_consumer_lag
+      target:
+        type: AverageValue
+        averageValue: 100
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: order-service-pdb
+  namespace: production
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: order-service
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: order-service
+  namespace: production
+spec:
+  host: order-service
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 100
+      http:
+        http1MaxPendingRequests: 100
+        maxRequestsPerConnection: 10
+    outlierDetection:
+      consecutive5xxErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 100
+    loadBalancer:
+      simple: LEAST_CONN
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: order-service-config
+  namespace: production
+data:
+  order-config.yml: |
+    database:
+      mongodb:
+        poolSize: 20
+        writeConcern: majority
+        readPreference: primaryPreferred
+    eventBus:
+      kafka:
+        topics:
+          orderCreated: order-created
+          orderUpdated: order-updated
+          orderCancelled: order-cancelled
+          paymentProcessed: payment-processed
+          inventoryUpdated: inventory-updated
+        consumer:
+          groupId: order-service-group
+          sessionTimeout: 30000
+          heartbeatInterval: 3000
+          maxBatchSize: 100
+        producer:
+          compression: snappy
+          retries: 3
+          batchSize: 16384
+          linger: 10
+    workflow:
+      saga:
+        enabled: true
+        timeout: 300000
+        retries: 3
+      compensation:
+        enabled: true
+        maxAttempts: 5
+    monitoring:
+      metrics:
+        enabled: true
+        interval: 15
+      tracing:
+        enabled: true
+        samplingRate: 0.1
+    api:
+      rateLimit:
+        windowMs: 60000
+        maxRequests: 1000
+      idempotency:
+        enabled: true
+        headerName: X-Idempotency-Key
+        expirationHours: 24
+    resilience:
+      circuitBreaker:
+        enabled: true
+        failureThreshold: 50
+        resetTimeout: 30000
+      retry:
+        enabled: true
+        maxAttempts: 3
+        backoff:
+          initialMs: 1000
+          maxMs: 5000
+          multiplier: 2
+    cache:
+      enabled: true
+      ttl: 3600
+      patterns:
+        - key: "order:{id}"
+          ttl: 3600
+        - key: "user:{id}:orders"
+          ttl: 1800

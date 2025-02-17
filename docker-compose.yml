@@ -1,0 +1,220 @@
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - API_GATEWAY_URL=http://api-gateway:4000
+    depends_on:
+      - api-gateway
+    networks:
+      - frontend-network
+      - monitoring-network
+
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
+    ports:
+      - "4000:4000"
+    environment:
+      - NODE_ENV=development
+      - AUTH_SERVICE_URL=http://auth-service:4001
+      - PRODUCT_SERVICE_URL=http://product-service:4002
+      - ORDER_SERVICE_URL=http://order-service:4003
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - auth-service
+      - product-service
+      - order-service
+      - redis
+    networks:
+      - frontend-network
+      - backend-network
+      - monitoring-network
+
+  auth-service:
+    build:
+      context: ./services/auth-service
+      dockerfile: Dockerfile
+    environment:
+      - NODE_ENV=development
+      - MONGODB_URI=mongodb://auth-db:27017/auth
+      - JWT_SECRET=your_jwt_secret
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - auth-db
+      - redis
+    networks:
+      - backend-network
+      - monitoring-network
+
+  product-service:
+    build:
+      context: ./services/product-service
+      dockerfile: Dockerfile
+    environment:
+      - NODE_ENV=development
+      - POSTGRES_URI=postgresql://postgres:password@product-db:5432/products
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - product-db
+      - redis
+    networks:
+      - backend-network
+      - monitoring-network
+
+  order-service:
+    build:
+      context: ./services/order-service
+      dockerfile: Dockerfile
+    environment:
+      - NODE_ENV=development
+      - MONGODB_URI=mongodb://order-db:27017/orders
+      - REDIS_URL=redis://redis:6379
+      - KAFKA_BROKERS=kafka:9092
+    depends_on:
+      - order-db
+      - redis
+      - kafka
+    networks:
+      - backend-network
+      - monitoring-network
+
+  notification-service:
+    build:
+      context: ./services/notification-service
+      dockerfile: Dockerfile
+    environment:
+      - NODE_ENV=development
+      - REDIS_URL=redis://redis:6379
+      - KAFKA_BROKERS=kafka:9092
+      - SMTP_HOST=smtp.mailtrap.io
+      - SMTP_PORT=2525
+    depends_on:
+      - redis
+      - kafka
+    networks:
+      - backend-network
+      - monitoring-network
+
+  auth-db:
+    image: mongo:latest
+    volumes:
+      - auth-data:/data/db
+    networks:
+      - backend-network
+
+  product-db:
+    image: postgres:latest
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=products
+    volumes:
+      - product-data:/var/lib/postgresql/data
+    networks:
+      - backend-network
+
+  order-db:
+    image: mongo:latest
+    volumes:
+      - order-data:/data/db
+    networks:
+      - backend-network
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - backend-network
+
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    environment:
+      - KAFKA_BROKER_ID=1
+      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+    depends_on:
+      - zookeeper
+    networks:
+      - backend-network
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    environment:
+      - ZOOKEEPER_CLIENT_PORT=2181
+    networks:
+      - backend-network
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - monitoring-network
+
+  grafana:
+    image: grafana/grafana:latest
+    volumes:
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - monitoring-network
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.9.3
+    environment:
+      - node.name=elasticsearch
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    networks:
+      - monitoring-network
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:7.9.3
+    ports:
+      - "5601:5601"
+    depends_on:
+      - elasticsearch
+    networks:
+      - monitoring-network
+
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:7.9.3
+    volumes:
+      - ./monitoring/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - monitoring-network
+
+networks:
+  frontend-network:
+  backend-network:
+  monitoring-network:
+
+volumes:
+  auth-data:
+  product-data:
+  order-data:
+  redis-data:
+  prometheus-data:
+  grafana-data:
+  elasticsearch-data:
